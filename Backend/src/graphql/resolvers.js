@@ -146,7 +146,9 @@ const resolvers = {
           aiSummary = 'Matched based on profile similarity to your search.';
         }
 
-        const application = await Application.findOne({ candidateId: candidate._id }).populate('jobId');
+        const application = await Application.findOne({ candidateId: candidate._id })
+      .populate('candidateId')
+      .populate('jobId');
 
         hits.push({
           candidate,
