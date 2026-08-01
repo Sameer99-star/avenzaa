@@ -11,6 +11,7 @@ const Job = require('./models/Job');
 const Candidate = require('./models/Candidate');
 const Application = require('./models/Application');
 const vectorIndex = require('./config/vectorDb');
+const { generateMatchExplanation } = require('./utils/matching');
 
 const JOBS = [
   {
@@ -184,18 +185,60 @@ async function seed() {
       await candidate.save();
 
       const job = createdJobs[c.jobIndex];
-      await Application.create({
+      const application = await Application.create({
         companyId: company._id,
         candidateId: candidate._id,
         jobId: job._id,
         stage: c.stage,
       });
 
-      console.log(`Created + embedded candidate: ${c.name} -> ${job.title} (${c.stage})`);
+      // Score immediately so the demo doesn't show blank/zero match scores
+      try {
+        const result = await generateMatchExplanation({ job, redactedProfile: candidate.redactedProfile });
+        application.matchScore = result.score;
+        application.matchExplanation = {
+          matchedRequirements: result.matchedRequirements || [],
+          gaps: result.gaps || [],
+          summary: result.summary || '',
+        };
+        await application.save();
+      } catch (err) {
+        console.error(`  (scoring failed for ${c.name}, will show 0 for now):`, err.message);
+      }
+
+      console.log(`Created + embedded + scored candidate: ${c.name} -> ${job.title} (${c.stage})`);
     }
   }
 
   console.log('\nSeeding complete.');
+
+  // Catch-up pass: score any applications that exist but weren't scored yet
+  // (e.g. from an earlier seed run before this scoring step was added).
+  const unscored = await Application.find({ companyId: company._id, matchScore: null })
+    .populate('candidateId')
+    .populate('jobId');
+  if (unscored.length > 0) {
+    console.log(`\nScoring ${unscored.length} existing unscored application(s)...`);
+    for (const app of unscored) {
+      try {
+        const result = await generateMatchExplanation({
+          job: app.jobId,
+          redactedProfile: app.candidateId.redactedProfile,
+        });
+        app.matchScore = result.score;
+        app.matchExplanation = {
+          matchedRequirements: result.matchedRequirements || [],
+          gaps: result.gaps || [],
+          summary: result.summary || '',
+        };
+        await app.save();
+        console.log(`  Scored: ${app.candidateId.name} -> ${result.score}`);
+      } catch (err) {
+        console.error(`  Failed to score ${app.candidateId.name}:`, err.message);
+      }
+    }
+  }
+
   console.log('Demo recruiter login: demo@avenza.com / demo1234');
   await mongoose.disconnect();
 }
