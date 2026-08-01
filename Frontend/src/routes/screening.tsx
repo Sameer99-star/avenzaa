@@ -1,46 +1,87 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Send, Check } from "lucide-react";
-import { screeningScript } from "@/lib/mockData";
+import { getScreeningSession, sendScreeningMessage, type ScreeningSessionData } from "@/lib/mockApi";
 
 export const Route = createFileRoute("/screening")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    applicationId: (search.applicationId as string) || "",
+  }),
   component: Screening,
 });
 
 type Msg = { role: "ai" | "candidate"; text: string };
 
 function Screening() {
-  const [messages, setMessages] = useState<Msg[]>([{ role: "ai", text: screeningScript[0].question }]);
-  const [step, setStep] = useState(0);
+  const { applicationId } = Route.useSearch();
+  const queryClient = useQueryClient();
+
+  const { data: session, isLoading, error } = useQuery<ScreeningSessionData>({
+    queryKey: ["screeningSession", applicationId],
+    queryFn: () => getScreeningSession(applicationId),
+    enabled: !!applicationId,
+  });
+
   const [input, setInput] = useState("");
-  const [aiTyping, setAiTyping] = useState(false);
-  const [done, setDone] = useState(false);
+  const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, aiTyping]);
+  }, [session, sending]);
 
-  const send = () => {
-    if (!input.trim() || aiTyping || done) return;
+  const messages: Msg[] = session?.transcript ?? [];
+  const done = session?.status === "completed";
+  const TARGET_QUESTIONS = 6; // mirrors backend TARGET_QUESTIONS
+
+  const send = async () => {
+    if (!input.trim() || sending || done || !applicationId) return;
     const answer = input.trim();
-    setMessages((m) => [...m, { role: "candidate", text: answer }]);
     setInput("");
-
-    const nextStep = step + 1;
-    if (nextStep >= screeningScript.length) {
-      setTimeout(() => setDone(true), 800);
-      return;
+    setSending(true);
+    try {
+      const updated = await sendScreeningMessage(applicationId, answer);
+      queryClient.setQueryData(["screeningSession", applicationId], updated);
+    } catch (err) {
+      console.error("Failed to send screening message:", err);
+    } finally {
+      setSending(false);
     }
-    setAiTyping(true);
-    setTimeout(() => {
-      setMessages((m) => [...m, { role: "ai", text: screeningScript[nextStep].question }]);
-      setStep(nextStep);
-      setAiTyping(false);
-    }, 1400);
   };
 
-  const progress = Math.min(((step + 1) / screeningScript.length) * 100, 100);
+  if (!applicationId) {
+    return (
+      <div className="min-h-screen bg-background grid place-items-center px-6">
+        <div className="max-w-md text-center">
+          <h1 className="text-xl font-semibold">No application specified</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Open this page with <code>?applicationId=&lt;id&gt;</code> from a candidate's profile.
+          </p>
+          <Link to="/candidates" className="mt-6 inline-block text-primary text-sm">← Back to candidates</Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background grid place-items-center px-6">
+        <div className="max-w-md text-center">
+          <h1 className="text-xl font-semibold">Couldn't load this screening session</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{(error as Error).message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background grid place-items-center">
+        <div className="text-sm text-muted-foreground">Loading screening chat…</div>
+      </div>
+    );
+  }
 
   if (done) {
     return (
@@ -61,6 +102,8 @@ function Screening() {
     );
   }
 
+  const progress = Math.min(((session?.questionsAsked ?? 1) / TARGET_QUESTIONS) * 100, 100);
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b border-border">
@@ -70,7 +113,7 @@ function Screening() {
             <span className="font-semibold">Avenza</span>
           </Link>
           <div className="text-xs text-muted-foreground">
-            Question {Math.min(step + 1, screeningScript.length)} of ~{screeningScript.length}
+            Question {Math.min(session?.questionsAsked ?? 1, TARGET_QUESTIONS)} of ~{TARGET_QUESTIONS}
           </div>
         </div>
         <div className="h-1 bg-muted">
@@ -94,7 +137,7 @@ function Screening() {
               }`}>{m.text}</div>
             </div>
           ))}
-          {aiTyping && (
+          {sending && (
             <div className="flex justify-start bubble-in">
               <div className="h-8 w-8 rounded-lg shrink-0 mr-3 mt-0.5 grid place-items-center bg-gradient-to-br from-primary to-primary/50">
                 <div className="h-2.5 w-2.5 rounded-[2px] bg-primary-foreground rotate-45" />
@@ -122,7 +165,7 @@ function Screening() {
             />
             <button
               onClick={send}
-              disabled={!input.trim() || aiTyping}
+              disabled={!input.trim() || sending}
               className="h-9 w-9 grid place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40 hover:opacity-90 transition-opacity"
             >
               <Send className="h-4 w-4" />

@@ -1,53 +1,271 @@
-import { candidates, jobs, type Candidate, type Job } from "./mockData";
+import type { Candidate, Job, ChatTurn, ScoreBreakdown } from "./mockData";
 
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Your live backend on Render. Change this if you redeploy elsewhere.
+const API_URL = "https://avenza-backend-egez.onrender.com/graphql";
+
+// Demo recruiter account (seeded via seed.js). The frontend auto-logs in
+// with this so you don't need a login page wired up yet.
+const DEMO_EMAIL = "demo@avenza.com";
+const DEMO_PASSWORD = "demo1234";
+
+let cachedToken: string | null = null;
+
+async function getToken(): Promise<string> {
+  if (cachedToken) return cachedToken;
+
+  const stored = typeof window !== "undefined" ? localStorage.getItem("avenza_token") : null;
+  if (stored) {
+    cachedToken = stored;
+    return stored;
+  }
+
+  const res = await gqlRaw(
+    `mutation { login(email: "${DEMO_EMAIL}", password: "${DEMO_PASSWORD}") { token } }`,
+  );
+  const token = res.data.login.token;
+  cachedToken = token;
+  if (typeof window !== "undefined") localStorage.setItem("avenza_token", token);
+  return token;
+}
+
+// Low-level GraphQL call, no auth — used only for the login call itself.
+async function gqlRaw(query: string, variables?: Record<string, unknown>) {
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+  });
+  const json = await res.json();
+  if (json.errors) throw new Error(json.errors[0]?.message || "GraphQL error");
+  return json;
+}
+
+// Authenticated GraphQL call — used for everything else.
+async function gql(query: string, variables?: Record<string, unknown>) {
+  const token = await getToken();
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  const json = await res.json();
+  if (json.errors) {
+    // Token might be stale — clear it so the next call re-logs in.
+    if (json.errors[0]?.extensions?.code === "UNAUTHENTICATED") {
+      cachedToken = null;
+      if (typeof window !== "undefined") localStorage.removeItem("avenza_token");
+    }
+    throw new Error(json.errors[0]?.message || "GraphQL error");
+  }
+  return json.data;
+}
+
+// ---- Mappers: backend shape -> frontend Job/Candidate types ----
+
+function mapJob(j: any): Job {
+  return {
+    id: j.id,
+    title: j.title,
+    department: j.department || "—",
+    location: "Remote", // not tracked in backend yet
+    status: j.status,
+    description: j.description,
+    requirements: j.requiredSkills, // backend doesn't split these out separately yet
+    skills: j.requiredSkills,
+    applicantCount: j.applicantCount,
+    createdAt: j.createdAt,
+  };
+}
+
+function mapApplicationToCandidate(app: any, transcript: ChatTurn[] = []): Candidate {
+  const candidate = app.candidate;
+  const profile = candidate.structuredProfile;
+  const redacted = candidate.redactedProfile;
+  const explanation = app.matchExplanation;
+
+  const breakdown: ScoreBreakdown[] = explanation
+    ? [
+        ...explanation.matchedRequirements.map((r: string) => ({
+          requirement: r,
+          match: "met" as const,
+          evidence: explanation.summary,
+        })),
+        ...explanation.gaps.map((g: string) => ({
+          requirement: g,
+          match: "gap" as const,
+          evidence: "No direct evidence in candidate's profile.",
+        })),
+      ]
+    : [];
+
+  return {
+    id: app.id,
+    anonId: redacted?.anonymizedId || "Candidate",
+    name: candidate.name,
+    email: candidate.email,
+    role: app.job.title,
+    jobId: app.job.id,
+    matchScore: app.matchScore ?? 0,
+    stage: app.stage.toLowerCase() as Candidate["stage"],
+    yearsExperience: profile?.yearsExperience ?? 0,
+    currentCompany: "—", // not tracked in backend yet
+    location: "Remote", // not tracked in backend yet
+    noticePeriodDays: profile?.noticePeriodDays ?? 30,
+    skills: profile?.skills ?? [],
+    breakdown,
+    transcript,
+    appliedAt: app.createdAt,
+  };
+}
+
+// ---- Public API (same function signatures as before) ----
 
 export async function listJobs(): Promise<Job[]> {
-  await delay(220);
-  return jobs;
+  const data = await gql(`
+    query {
+      jobs {
+        id title department description requiredSkills niceToHaveSkills status applicantCount createdAt
+      }
+    }
+  `);
+  return data.jobs.map(mapJob);
 }
 
 export async function getJob(id: string): Promise<Job | undefined> {
-  await delay(180);
-  return jobs.find((j) => j.id === id);
+  const data = await gql(
+    `query GetJob($id: ID!) {
+      job(id: $id) {
+        id title department description requiredSkills niceToHaveSkills status applicantCount createdAt
+      }
+    }`,
+    { id },
+  );
+  return data.job ? mapJob(data.job) : undefined;
 }
 
 export async function listCandidates(filter?: { jobId?: string }): Promise<Candidate[]> {
-  await delay(260);
-  return filter?.jobId ? candidates.filter((c) => c.jobId === filter.jobId) : candidates;
+  const data = await gql(
+    `query ListApplications($jobId: ID) {
+      applications(jobId: $jobId) {
+        id stage matchScore createdAt
+        matchExplanation { matchedRequirements gaps summary }
+        candidate {
+          id name email
+          structuredProfile { skills yearsExperience education noticePeriodDays }
+          redactedProfile { anonymizedId skills yearsExperience }
+        }
+        job { id title }
+      }
+    }`,
+    { jobId: filter?.jobId },
+  );
+  return data.applications.map((app: any) => mapApplicationToCandidate(app));
 }
 
 export async function getCandidate(id: string): Promise<Candidate | undefined> {
-  await delay(200);
-  return candidates.find((c) => c.id === id);
+  const data = await gql(
+    `query GetApplication($id: ID!) {
+      application(id: $id) {
+        id stage matchScore createdAt
+        matchExplanation { matchedRequirements gaps summary }
+        candidate {
+          id name email
+          structuredProfile { skills yearsExperience education noticePeriodDays }
+          redactedProfile { anonymizedId skills yearsExperience }
+        }
+        job { id title }
+      }
+      screeningSession(applicationId: $id) {
+        transcript { sender content }
+      }
+    }`,
+    { id },
+  );
+  if (!data.application) return undefined;
+
+  const transcript: ChatTurn[] = (data.screeningSession?.transcript ?? []).map((m: any) => ({
+    role: m.sender === "ai" ? "ai" : "candidate",
+    text: m.content,
+  }));
+
+  return mapApplicationToCandidate(data.application, transcript);
 }
 
 export async function copilotSearch(query: string): Promise<{ candidate: Candidate; reason: string }[]> {
-  await delay(900);
-  const q = query.toLowerCase();
-  const scored = candidates.map((c) => {
-    let score = 0;
-    const reasons: string[] = [];
-    if (/kafka/.test(q) && c.skills.includes("Kafka")) { score += 3; reasons.push("Kafka in stack"); }
-    if (/kubernetes|k8s/.test(q) && c.skills.includes("Kubernetes")) { score += 3; reasons.push("Kubernetes production experience"); }
-    if (/backend/.test(q) && /Backend/.test(c.role)) { score += 2; reasons.push("Backend Engineer applicant"); }
-    if (/designer|design/.test(q) && /Designer/.test(c.role)) { score += 2; reasons.push("Product Design background"); }
-    if (/data/.test(q) && /Data/.test(c.role)) { score += 2; reasons.push("Data Analyst applicant"); }
-    if (/notice|30|days/.test(q) && c.noticePeriodDays <= 30) { score += 2; reasons.push(`${c.noticePeriodDays}-day notice`); }
-    const yearsMatch = q.match(/(\d+)\+?\s*years?/);
-    if (yearsMatch && c.yearsExperience >= Number(yearsMatch[1])) { score += 2; reasons.push(`${c.yearsExperience}y experience`); }
-    const scoreMatch = q.match(/(\d+)%/);
-    if (scoreMatch && c.matchScore >= Number(scoreMatch[1])) { score += 2; reasons.push(`${c.matchScore}% match`); }
-    if (/hired|ready|top/.test(q) && c.matchScore >= 85) { score += 2; reasons.push("Interview-ready"); }
-    if (/gap|flag/.test(q) && c.breakdown.some((b) => b.match === "gap")) { score += 2; reasons.push("Has flagged skill gap"); }
-    if (/europe|eu|remote/.test(q) && (c.location.includes("EU") || /Berlin|Lisbon|Amsterdam|London|Paris|Warsaw/.test(c.location))) {
-      score += 1; reasons.push(`Based in ${c.location}`);
-    }
-    return { candidate: c, score, reason: reasons.slice(0, 2).join(" · ") || `Match score ${c.matchScore}%` };
-  });
-  const results = scored.filter((r) => r.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);
-  if (results.length === 0) {
-    return candidates.slice(0, 3).map((c) => ({ candidate: c, reason: `Closest match by profile · ${c.matchScore}%` }));
-  }
-  return results.map(({ candidate, reason }) => ({ candidate, reason }));
+  const data = await gql(
+    `query Search($query: String!) {
+      searchCandidates(query: $query, topK: 5) {
+        score
+        aiSummary
+        application {
+          id stage matchScore createdAt
+          matchExplanation { matchedRequirements gaps summary }
+          candidate {
+            id name email
+            structuredProfile { skills yearsExperience education noticePeriodDays }
+            redactedProfile { anonymizedId skills yearsExperience }
+          }
+          job { id title }
+        }
+      }
+    }`,
+    { query },
+  );
+
+  return data.searchCandidates
+    .filter((hit: any) => hit.application) // skip candidates with no application yet
+    .map((hit: any) => ({
+      candidate: mapApplicationToCandidate(hit.application),
+      reason: hit.aiSummary,
+    }));
+}
+export interface ScreeningSessionData {
+  status: string;
+  questionsAsked: number;
+  transcript: ChatTurn[];
+}
+
+export async function getScreeningSession(applicationId: string): Promise<ScreeningSessionData> {
+  const data = await gql(
+    `query GetSession($applicationId: ID!) {
+      screeningSession(applicationId: $applicationId) {
+        status
+        questionsAsked
+        transcript { sender content }
+      }
+    }`,
+    { applicationId },
+  );
+  return {
+    status: data.screeningSession.status,
+    questionsAsked: data.screeningSession.questionsAsked,
+    transcript: data.screeningSession.transcript.map((m: any) => ({
+      role: m.sender === "ai" ? "ai" : "candidate",
+      text: m.content,
+    })),
+  };
+}
+
+export async function sendScreeningMessage(applicationId: string, content: string): Promise<ScreeningSessionData> {
+  const data = await gql(
+    `mutation SendMsg($applicationId: ID!, $content: String!) {
+      sendScreeningMessage(applicationId: $applicationId, content: $content) {
+        status
+        questionsAsked
+        transcript { sender content }
+      }
+    }`,
+    { applicationId, content },
+  );
+  return {
+    status: data.sendScreeningMessage.status,
+    questionsAsked: data.sendScreeningMessage.questionsAsked,
+    transcript: data.sendScreeningMessage.transcript.map((m: any) => ({
+      role: m.sender === "ai" ? "ai" : "candidate",
+      text: m.content,
+    })),
+  };
 }

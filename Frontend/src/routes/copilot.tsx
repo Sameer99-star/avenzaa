@@ -25,17 +25,26 @@ function Copilot() {
   }, [turns, loading]);
 
   const run = async (query: string) => {
-    if (!query.trim() || loading) return;
-    setTurns((t) => [...t, { role: "user", text: query }]);
-    setInput("");
-    setLoading(true);
+  if (!query.trim() || loading) return;
+  setTurns((t) => [...t, { role: "user", text: query }]);
+  setInput("");
+  setLoading(true);
+  try {
     const results = await copilotSearch(query);
     setTurns((t) => [
       ...t,
       { role: "ai", text: `Found ${results.length} candidate${results.length === 1 ? "" : "s"} matching your query.`, results },
     ]);
+  } catch (err) {
+    console.error("Copilot search failed:", err);
+    setTurns((t) => [
+      ...t,
+      { role: "ai", text: `Something went wrong: ${(err as Error).message}`, results: [] },
+    ]);
+  } finally {
     setLoading(false);
-  };
+  }
+};
 
   return (
     <AppShell title="Co-pilot" subtitle="Search your talent pool in natural language">
