@@ -114,6 +114,23 @@ const typeDefs = gql`
     aiSummary: String!
   }
 
+  type FunnelStage {
+    stage: String!
+    value: Int!
+  }
+
+  type ActivityItem {
+    id: ID!
+    text: String!
+    time: String!
+    kind: String!
+  }
+
+  type DashboardStats {
+    funnel: [FunnelStage!]!
+    recentActivity: [ActivityItem!]!
+  }
+
   type Query {
     me: User
     jobs(status: String): [Job!]!
@@ -123,6 +140,7 @@ const typeDefs = gql`
     screeningSession(applicationId: ID!): ScreeningSession
     # Stage 3 — recruiter co-pilot: semantic search across the whole candidate pool
     searchCandidates(query: String!, topK: Int): [CandidateSearchHit!]!
+    dashboardStats: DashboardStats!
   }
 
   type Mutation {

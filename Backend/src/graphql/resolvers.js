@@ -13,6 +13,19 @@ function slugify(name) {
   return name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 }
 
+function timeAgo(date) {
+  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days} days ago`;
+  return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 const resolvers = {
   // GraphQL enums require the internal value to exactly match the enum
   // name unless we map it explicitly. Our Mongoose models store roles
@@ -147,8 +160,8 @@ const resolvers = {
         }
 
         const application = await Application.findOne({ candidateId: candidate._id })
-      .populate('candidateId')
-      .populate('jobId');
+          .populate('candidateId')
+          .populate('jobId');
 
         hits.push({
           candidate,
@@ -159,6 +172,62 @@ const resolvers = {
       }
 
       return hits;
+    },
+
+    // Real pipeline funnel + recent activity, replacing the frontend's
+    // previously-hardcoded demo numbers.
+    dashboardStats: async (_parent, _args, { user }) => {
+      requireAuth(user);
+
+      const stageCounts = await Application.aggregate([
+        { $match: { companyId: user.companyId } },
+        { $group: { _id: '$stage', count: { $sum: 1 } } },
+      ]);
+      const countMap = Object.fromEntries(stageCounts.map((s) => [s._id, s.count]));
+
+      // Funnel is cumulative by design (a "shortlisted" candidate was also
+      // "applied" and "screened" at some point), so each stage counts
+      // everyone who has reached at least that point in the pipeline.
+      const applied =
+        (countMap.applied || 0) +
+        (countMap.screening || 0) +
+        (countMap.screened || 0) +
+        (countMap.shortlisted || 0) +
+        (countMap.hired || 0);
+      const screened = (countMap.screened || 0) + (countMap.shortlisted || 0) + (countMap.hired || 0);
+      const shortlisted = (countMap.shortlisted || 0) + (countMap.hired || 0);
+      const hired = countMap.hired || 0;
+
+      const funnel = [
+        { stage: 'Applied', value: applied },
+        { stage: 'Screened', value: screened },
+        { stage: 'Shortlisted', value: shortlisted },
+        { stage: 'Hired', value: hired },
+      ];
+
+      const recent = await Application.find({ companyId: user.companyId })
+        .sort({ updatedAt: -1 })
+        .limit(5)
+        .populate('candidateId')
+        .populate('jobId');
+
+      const stageVerb = {
+        applied: 'applied to',
+        screening: 'started screening for',
+        screened: 'completed screening for',
+        shortlisted: 'was shortlisted for',
+        hired: 'was hired for',
+        rejected: 'was rejected for',
+      };
+
+      const recentActivity = recent.map((app) => ({
+        id: app._id.toString(),
+        text: `${app.candidateId?.name || 'A candidate'} ${stageVerb[app.stage] || 'updated status for'} ${app.jobId?.title || 'a role'}`,
+        time: timeAgo(app.updatedAt),
+        kind: app.stage,
+      }));
+
+      return { funnel, recentActivity };
     },
   },
 

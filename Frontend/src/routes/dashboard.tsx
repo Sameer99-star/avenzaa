@@ -1,8 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/app-shell";
-import { listCandidates, listJobs } from "@/lib/mockApi";
-import { activityFeed, funnelData } from "@/lib/mockData";
+import { listCandidates, listJobs, getDashboardStats } from "@/lib/mockApi";
 import { Briefcase, Users, Clock, TrendingUp, ArrowUpRight } from "lucide-react";
 
 export const Route = createFileRoute("/dashboard")({
@@ -12,10 +11,13 @@ export const Route = createFileRoute("/dashboard")({
 function Dashboard() {
   const jobs = useQuery({ queryKey: ["jobs"], queryFn: listJobs });
   const cands = useQuery({ queryKey: ["candidates"], queryFn: () => listCandidates() });
+  const stats = useQuery({ queryKey: ["dashboardStats"], queryFn: getDashboardStats });
 
   const openRoles = jobs.data?.filter((j) => j.status === "open").length ?? 0;
   const active = cands.data?.length ?? 0;
-  const maxFunnel = Math.max(...funnelData.map((f) => f.value));
+  const funnel = stats.data?.funnel ?? [];
+  const recentActivity = stats.data?.recentActivity ?? [];
+  const maxFunnel = Math.max(...funnel.map((f) => f.value), 1);
 
   return (
     <AppShell title="Dashboard" subtitle="Your hiring pipeline at a glance">
@@ -61,7 +63,7 @@ function Dashboard() {
             </div>
           </div>
           <div className="space-y-4">
-            {funnelData.map((f, i) => {
+            {funnel.map((f, i) => {
               const stageColors = [
                 "var(--stage-applied)",
                 "var(--stage-screened)",
@@ -94,7 +96,7 @@ function Dashboard() {
         <div className="rounded-2xl glass-card p-7">
           <h2 className="font-semibold text-lg">Recent activity</h2>
           <div className="mt-4 space-y-4">
-            {activityFeed.map((a) => (
+            {recentActivity.map((a) => (
               <div key={a.id} className="flex gap-3 text-sm">
                 <div className="h-2 w-2 mt-1.5 rounded-full bg-[color:var(--accent-warm)] shrink-0" />
                 <div className="flex-1">

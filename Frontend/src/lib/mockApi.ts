@@ -276,3 +276,20 @@ export async function sendScreeningMessage(applicationId: string, content: strin
     })),
   };
 }
+
+export interface DashboardStats {
+  funnel: { stage: string; value: number }[];
+  recentActivity: { id: string; text: string; time: string; kind: string }[];
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  const data = await gql(`
+    query {
+      dashboardStats {
+        funnel { stage value }
+        recentActivity { id text time kind }
+      }
+    }
+  `);
+  return data.dashboardStats;
+}
