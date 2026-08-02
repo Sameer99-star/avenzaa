@@ -225,7 +225,7 @@ async function seed() {
   // before these fields existed.
   for (const c of CANDIDATES) {
     await Candidate.updateOne(
-      { companyId: company._id, email: c.email, location: '' },
+      { companyId: company._id, email: c.email },
       { $set: { location: c.location, currentCompany: c.currentCompany } },
     );
   }
