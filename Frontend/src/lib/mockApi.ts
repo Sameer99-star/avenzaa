@@ -8,6 +8,13 @@ const API_URL = "https://avenza-backend-egez.onrender.com/graphql";
 const DEMO_EMAIL = "demo@avenza.com";
 const DEMO_PASSWORD = "demo1234";
 
+function formatDate(value: string): string {
+  const num = Number(value);
+  const date = !isNaN(num) && value.trim() !== "" ? new Date(num) : new Date(value);
+  if (isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
 let cachedToken: string | null = null;
 
 async function getToken(): Promise<string> {
@@ -111,13 +118,13 @@ function mapApplicationToCandidate(app: any, transcript: ChatTurn[] = []): Candi
     matchScore: app.matchScore ?? 0,
     stage: app.stage.toLowerCase() as Candidate["stage"],
     yearsExperience: profile?.yearsExperience ?? 0,
-    currentCompany: "—", // not tracked in backend yet
-    location: "Remote", // not tracked in backend yet
+    currentCompany: candidate.currentCompany || "—",
+    location: candidate.location || "Remote",
     noticePeriodDays: profile?.noticePeriodDays ?? 30,
     skills: profile?.skills ?? [],
     breakdown,
     transcript,
-    appliedAt: app.createdAt,
+    appliedAt: formatDate(app.createdAt),
   };
 }
 
@@ -153,7 +160,7 @@ export async function listCandidates(filter?: { jobId?: string }): Promise<Candi
         id stage matchScore createdAt
         matchExplanation { matchedRequirements gaps summary }
         candidate {
-          id name email
+          id name email location currentCompany
           structuredProfile { skills yearsExperience education noticePeriodDays }
           redactedProfile { anonymizedId skills yearsExperience }
         }
@@ -172,7 +179,7 @@ export async function getCandidate(id: string): Promise<Candidate | undefined> {
         id stage matchScore createdAt
         matchExplanation { matchedRequirements gaps summary }
         candidate {
-          id name email
+          id name email location currentCompany
           structuredProfile { skills yearsExperience education noticePeriodDays }
           redactedProfile { anonymizedId skills yearsExperience }
         }

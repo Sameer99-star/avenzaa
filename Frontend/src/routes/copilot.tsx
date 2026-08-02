@@ -26,7 +26,7 @@ function Copilot() {
 
   const run = async (query: string) => {
   if (!query.trim() || loading) return;
-  setTurns((t) => [...t, { role: "user", text: query }]);
+  setTurns((t) => [...t, { role: "user", text: query }]);``
   setInput("");
   setLoading(true);
   try {

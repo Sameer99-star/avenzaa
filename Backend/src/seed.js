@@ -53,46 +53,55 @@ const CANDIDATES = [
     name: 'Amelia Andersen', email: 'amelia.andersen@example.com',
     skills: ['Node.js', 'MongoDB', 'Express', 'React'], yearsExperience: 5,
     education: 'B.Tech Computer Science, IIT Delhi', noticePeriodDays: 30, jobIndex: 0, stage: 'applied',
+    location: 'Berlin, DE', currentCompany: 'Stripe',
   },
   {
     name: 'Diego Salim', email: 'diego.salim@example.com',
     skills: ['Node.js', 'MongoDB', 'GraphQL', 'Docker', 'Kubernetes'], yearsExperience: 6,
     education: 'M.S. Computer Science, Warsaw University', noticePeriodDays: 15, jobIndex: 0, stage: 'screened',
+    location: 'Warsaw, PL', currentCompany: 'Ramp',
   },
   {
     name: 'Sana Chen', email: 'sana.chen@example.com',
     skills: ['Node.js', 'MongoDB', 'GraphQL', 'Docker', 'System Design', 'AWS'], yearsExperience: 7,
     education: 'B.Tech Computer Science, NTU Singapore', noticePeriodDays: 45, jobIndex: 0, stage: 'shortlisted',
+    location: 'Remote · EU', currentCompany: 'Figma',
   },
   {
     name: 'Noah Ahmed', email: 'noah.ahmed@example.com',
     skills: ['Figma', 'User Research', 'Prototyping'], yearsExperience: 4,
     education: 'B.Des, National Institute of Design', noticePeriodDays: 20, jobIndex: 1, stage: 'applied',
+    location: 'Lisbon, PT', currentCompany: 'Vercel',
   },
   {
     name: 'Fatima Weber', email: 'fatima.weber@example.com',
     skills: ['Figma', 'User Research', 'Prototyping', 'Design Systems', 'Motion Design'], yearsExperience: 8,
     education: 'MFA Design, Rhode Island School of Design', noticePeriodDays: 60, jobIndex: 1, stage: 'shortlisted',
+    location: 'Berlin, DE', currentCompany: 'Ramp',
   },
   {
     name: 'Priya Tanaka', email: 'priya.tanaka@example.com',
     skills: ['SQL', 'Python', 'Excel'], yearsExperience: 2,
     education: 'B.Sc Statistics, University of Amsterdam', noticePeriodDays: 30, jobIndex: 2, stage: 'screened',
+    location: 'Amsterdam, NL', currentCompany: 'Cloudflare',
   },
   {
     name: 'Ines Silva', email: 'ines.silva@example.com',
     skills: ['SQL', 'Python', 'Data Visualization', 'dbt', 'Looker'], yearsExperience: 4,
     education: 'M.S. Data Science, Sorbonne University', noticePeriodDays: 30, jobIndex: 2, stage: 'shortlisted',
+    location: 'Paris, FR', currentCompany: 'Vercel',
   },
   {
     name: 'Kenji Kapoor', email: 'kenji.kapoor@example.com',
     skills: ['Docker', 'CI/CD', 'AWS'], yearsExperience: 3,
     education: 'B.Tech Electronics, Berlin Institute of Technology', noticePeriodDays: 15, jobIndex: 3, stage: 'applied',
+    location: 'Berlin, DE', currentCompany: 'Cloudflare',
   },
   {
     name: 'Marcus Duarte', email: 'marcus.duarte@example.com',
     skills: ['Kubernetes', 'Docker', 'CI/CD', 'Terraform', 'AWS', 'Prometheus'], yearsExperience: 6,
     education: 'B.Sc Computer Science, University College London', noticePeriodDays: 45, jobIndex: 3, stage: 'hired',
+    location: 'London, UK', currentCompany: 'Datadog',
   },
 ];
 
@@ -167,6 +176,8 @@ async function seed() {
         companyId: company._id,
         name: c.name,
         email: c.email,
+        location: c.location,
+        currentCompany: c.currentCompany,
         resumeUrl: 'https://example.com/demo-resume.pdf', // placeholder — no real file for seeded data
         resumeText: `${c.name}. Skills: ${c.skills.join(', ')}. ${c.yearsExperience} years experience. ${c.education}.`,
         structuredProfile,
@@ -208,6 +219,15 @@ async function seed() {
 
       console.log(`Created + embedded + scored candidate: ${c.name} -> ${job.title} (${c.stage})`);
     }
+  }
+
+  // Catch-up pass: backfill location/currentCompany on candidates created
+  // before these fields existed.
+  for (const c of CANDIDATES) {
+    await Candidate.updateOne(
+      { companyId: company._id, email: c.email, location: '' },
+      { $set: { location: c.location, currentCompany: c.currentCompany } },
+    );
   }
 
   console.log('\nSeeding complete.');

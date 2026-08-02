@@ -70,6 +70,8 @@ const typeDefs = gql`
     name: String!
     email: String!
     resumeUrl: String!
+    location: String
+    currentCompany: String
     structuredProfile: StructuredProfile
     redactedProfile: RedactedProfile
   }

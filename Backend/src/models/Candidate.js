@@ -23,6 +23,14 @@ const candidateSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    location: {
+      type: String,
+      default: '',
+    },
+    currentCompany: {
+      type: String,
+      default: '',
+    },
     resumeUrl: {
       type: String, // Cloudflare R2 / Cloudinary link to the raw PDF
       required: true,
